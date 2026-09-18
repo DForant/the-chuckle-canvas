@@ -1,0 +1,52 @@
+name: AI Studio Agent Developer
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  run-agent:
+    if: github.event.label.name == 'ai-task'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Monorepo Dependencies
+        run: npm ci
+
+      - name: Execute Orchestrator
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: node .github/scripts/run-agent.mjs
+
+      - name: Push Branch & Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          BRANCH="ai/issue-${ISSUE_NUM}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b $BRANCH
+          git add client/ server/
+          git commit -m "feat: automated changes for issue #${ISSUE_NUM}" || exit 0
+          git push origin $BRANCH
+          gh pr create \
+            --title "AI: ${{ github.event.issue.title }}" \
+            --body "Resolves #${ISSUE_NUM}. Scope handled automatically by AI Studio Orchestrator." \
+            --base main \
+            --head $BRANCH
