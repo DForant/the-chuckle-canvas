@@ -1,0 +1,29 @@
+name: AI Task Specification
+description: Dispatch development to specialized Gemini agents
+labels: ["ai-task"]
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Target Scope
+      options:
+        - "client"
+        - "server"
+        - "testing"
+        - "monorepo"
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective & Requirements
+      description: What specific routes, components, or test suites need implementation?
+    validations:
+      required: true
+  - type: textarea
+    id: file-targets
+    attributes:
+      label: Target Files
+      description: Specific paths the agent should inspect or modify.
+    validations:
+      required: true
