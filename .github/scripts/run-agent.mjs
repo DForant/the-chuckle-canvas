@@ -111,7 +111,7 @@ async function runAgentTurn(systemPrompt, userPrompt) {
 
   let response = await sendWithRetry(session, { message: userPrompt });
   let turnCount = 0;
-  const MAX_TURNS = 6; // Hard cutoff to prevent runaway quota burn
+  const MAX_TURNS = 8; // Hard cutoff to prevent runaway quota burn
 
   while (response.functionCalls && response.functionCalls.length > 0) {
     turnCount++;
