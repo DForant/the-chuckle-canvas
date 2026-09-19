@@ -5,7 +5,6 @@ import path from "path";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// 1. Tool definitions for filesystem access and CLI verification
 const tools = [
   {
     functionDeclarations: [
@@ -69,7 +68,6 @@ function executeTool(name, args) {
   throw new Error(`Unknown tool: ${name}`);
 }
 
-async function runAgentTurn(systemPrompt, userPrompt) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function sendWithRetry(chatSession, payload, maxRetries = 4) {
@@ -79,7 +77,6 @@ async function sendWithRetry(chatSession, payload, maxRetries = 4) {
     } catch (err) {
       const is429 = err.status === 429 || (err.message && err.message.includes("429"));
       if (is429 && attempt < maxRetries) {
-        // Extract server retry delay or default to 15s exponential backoff
         const retryDelayMatch = err.message?.match(/retry in ([0-9.]+)s/);
         const waitMs = retryDelayMatch 
           ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
@@ -110,7 +107,6 @@ async function runAgentTurn(systemPrompt, userPrompt) {
     console.log(`Executing tool: ${call.name}(${JSON.stringify(call.args)})`);
     const toolResult = executeTool(call.name, call.args);
 
-    // Prevent bursting over the 5 RPM window
     await sleep(12500);
 
     response = await sendWithRetry(session, {
@@ -127,15 +123,15 @@ async function runAgentTurn(systemPrompt, userPrompt) {
 
   return response.text;
 }
-}
 
 function extractScope(body) {
+  if (!body) return "monorepo";
   const match = body.match(/###\s*Target Scope\s*\n+([^\n\r]+)/i);
   return match ? match[1].trim().toLowerCase() : "monorepo";
 }
 
 async function main() {
-  const issueBody = process.env.ISSUE_BODY;
+  const issueBody = process.env.ISSUE_BODY || "";
   const scope = extractScope(issueBody);
 
   const apiPrompt = fs.readFileSync(".github/agents/prompts/server-agent.md", "utf8");
