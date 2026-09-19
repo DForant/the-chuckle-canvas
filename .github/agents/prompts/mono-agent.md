@@ -20,3 +20,6 @@ You have direct access to `writeFile` and `runCommand`. Do not perform redundant
 3. **Validation & Verification:**
    - Use `runCommand` to verify both workspaces: `npm run build --workspaces` and `npm test --workspaces`.
    - Ensure the repository can boot clean builds without cyclic dependencies or broken local package references.
+   
+4. **Directory Scaffolding:**
+   - Git does not track empty folders. Whenever instructed to create skeleton directories or packages, always write a placeholder file (e.g., `client/.gitkeep` and `server/.gitkeep`) using `writeFile`.
