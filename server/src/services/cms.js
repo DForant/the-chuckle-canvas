@@ -1,17 +1,15 @@
 const fetch = require('node-fetch');
 
-const DEFAULT_GRAPHQL_ENDPOINT = 'https://cms.thechucklecanvas.com/graphql';
-
 /**
- * Executes a GraphQL query against the WordPress CMS endpoint.
+ * Lightweight GraphQL client function for querying WPGraphQL.
  * 
- * @param {string} query - The GraphQL query string.
- * @param {Object} [variables={}] - Variables for the GraphQL query.
- * @param {Object} [headers={}] - Additional headers (e.g., woocommerce-session).
- * @returns {Promise<Object>} The data property from the GraphQL response.
+ * @param {string} query - GraphQL query or mutation string.
+ * @param {Object} [variables={}] - Query variables.
+ * @param {Object} [headers={}] - Additional headers.
+ * @returns {Promise<Object>} - The data object from the GraphQL response.
  */
-async function queryCMS(query, variables = {}, headers = {}) {
-  const endpoint = process.env.GRAPHQL_ENDPOINT || DEFAULT_GRAPHQL_ENDPOINT;
+async function graphQLClient(query, variables = {}, headers = {}) {
+  const endpoint = process.env.GRAPHQL_ENDPOINT || 'https://cms.thechucklecanvas.com/graphql';
 
   let response;
   try {
@@ -19,113 +17,107 @@ async function queryCMS(query, variables = {}, headers = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...headers,
+        ...headers
       },
       body: JSON.stringify({
         query,
-        variables,
-      }),
+        variables
+      })
     });
   } catch (networkError) {
-    const err = new Error(`CMS Network Error: ${networkError.message}`);
-    err.statusCode = 503;
-    throw err;
+    const error = new Error(`Network error while connecting to GraphQL endpoint: ${networkError.message}`);
+    error.statusCode = 503;
+    throw error;
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch (jsonError) {
+    const error = new Error('Invalid JSON response from GraphQL endpoint');
+    error.statusCode = 502;
+    throw error;
   }
 
   if (!response.ok) {
-    let errorBody;
-    try {
-      errorBody = await response.text();
-    } catch (e) {
-      errorBody = response.statusText;
+    const errorMsg = result.message || (result.errors && result.errors[0]?.message) || `GraphQL request failed with status ${response.status}`;
+    const error = new Error(errorMsg);
+    error.statusCode = response.status;
+    error.errors = result.errors;
+    throw error;
+  }
+
+  if (result.errors && result.errors.length > 0) {
+    const errorMessages = result.errors.map(e => e.message).join(', ');
+    const error = new Error(`GraphQL Error: ${errorMessages}`);
+    if (errorMessages.toLowerCase().includes('not found') || errorMessages.toLowerCase().includes('does not exist')) {
+      error.statusCode = 404;
+    } else {
+      error.statusCode = 400;
     }
-    const err = new Error(`CMS HTTP Error: ${response.status} ${response.statusText} - ${errorBody}`);
-    err.statusCode = response.status >= 500 ? 502 : response.status;
-    throw err;
+    error.errors = result.errors;
+    throw error;
   }
 
-  let json;
-  try {
-    json = await response.json();
-  } catch (parseError) {
-    const err = new Error(`CMS Invalid JSON Response: ${parseError.message}`);
-    err.statusCode = 502;
-    throw err;
-  }
-
-  if (json.errors && json.errors.length > 0) {
-    const messages = json.errors.map(e => e.message).join('; ');
-    const err = new Error(`CMS GraphQL Error: ${messages}`);
-    err.statusCode = 400;
-    err.graphqlErrors = json.errors;
-    throw err;
-  }
-
-  return json.data;
+  return result.data;
 }
 
 /**
- * Normalizes a WPGraphQL product node into a standardized product object.
+ * Normalizes a WPGraphQL product node into standard format.
  */
 function normalizeProduct(node) {
   if (!node) return null;
 
-  const id = node.id;
-  const title = node.title || node.name || '';
-  const slug = node.slug || '';
-  
   let price = node.price || node.regularPrice || null;
-  if (!price && node.node && node.node.price) {
-    price = node.node.price;
-  }
+  let imageUrl = node.image?.sourceUrl || '';
 
-  let imageUrl = null;
-  if (node.image && node.image.sourceUrl) {
-    imageUrl = node.image.sourceUrl;
-  } else if (node.featuredImage && node.featuredImage.node && node.featuredImage.node.sourceUrl) {
-    imageUrl = node.featuredImage.node.sourceUrl;
-  }
-
-  const description = node.description || node.shortDescription || '';
-
-  const normalized = {
-    id,
-    title,
-    slug,
+  return {
+    id: node.id,
+    title: node.name || '',
+    slug: node.slug || '',
     price,
     imageUrl,
-    description,
+    description: node.description || ''
   };
-
-  if (node.galleryImages && node.galleryImages.nodes) {
-    normalized.galleryImages = node.galleryImages.nodes.map(img => img.sourceUrl).filter(Boolean);
-  }
-
-  if (node.variations && node.variations.nodes) {
-    normalized.variants = node.variations.nodes.map(v => ({
-      id: v.id,
-      name: v.name || v.title,
-      price: v.price || v.regularPrice,
-      attributes: v.attributes ? v.attributes.nodes : [],
-    }));
-  } else if (node.attributes && node.attributes.nodes) {
-    normalized.attributes = node.attributes.nodes;
-  }
-
-  return normalized;
 }
 
 /**
- * Fetches published products with pagination.
- * 
- * @param {number} [first=20] - Number of products to fetch.
- * @param {string} [after=null] - Cursor for pagination.
- * @param {Object} [headers={}] - Request headers (e.g., woocommerce-session).
- * @returns {Promise<Object>} { products: Array, pageInfo: Object }
+ * Normalizes a single detailed product including image gallery and size variants.
  */
-async function fetchProducts(first = 20, after = null, headers = {}) {
-  const PRODUCTS_QUERY = `
-    Query GetProducts($first: Int, $after: String) {
+function normalizeProductDetail(node) {
+  if (!node) return null;
+
+  const baseProduct = normalizeProduct(node);
+
+  let gallery = [];
+  if (node.galleryImages?.nodes) {
+    gallery = node.galleryImages.nodes.map(img => img.sourceUrl).filter(Boolean);
+  }
+
+  let variants = [];
+  if (node.variations?.nodes) {
+    variants = node.variations.nodes.map(v => ({
+      id: v.id,
+      name: v.name || '',
+      price: v.price || v.regularPrice || baseProduct.price,
+      attributes: v.attributes?.nodes || []
+    }));
+  }
+
+  return {
+    ...baseProduct,
+    gallery,
+    variants,
+    categories: node.productCategories?.nodes?.map(c => ({ id: c.id, name: c.name, slug: c.slug })) || []
+  };
+}
+
+/**
+ * Fetch published products returning { products: Array, pageInfo: Object }.
+ */
+async function fetchProducts(first = 20, after = null) {
+  const query = `
+    query GetProducts($first: Int!, $after: String) {
       products(first: $first, after: $after, where: { status: "PUBLISH" }) {
         pageInfo {
           hasNextPage
@@ -133,56 +125,68 @@ async function fetchProducts(first = 20, after = null, headers = {}) {
         }
         nodes {
           id
-          title
+          databaseId
+          name
           slug
-          price
+          description
           image {
             sourceUrl
+            altText
           }
-          description
+          ... on SimpleProduct {
+            price
+            regularPrice
+            salePrice
+          }
+          ... on VariableProduct {
+            price
+            regularPrice
+            salePrice
+          }
         }
       }
     }
   `;
 
-  const data = await queryCMS(PRODUCTS_QUERY, { first, after }, headers);
-  
-  const connection = data && data.products;
-  const nodes = (connection && connection.nodes) || [];
-  const pageInfo = (connection && connection.pageInfo) || { hasNextPage: false, endCursor: null };
+  const data = await graphQLClient(query, { first, after });
+  const productConnection = data?.products || { nodes: [], pageInfo: {} };
+  const products = (productConnection.nodes || []).map(normalizeProduct);
 
   return {
-    products: nodes.map(normalizeProduct),
-    pageInfo,
+    products,
+    pageInfo: productConnection.pageInfo || {}
   };
 }
 
 /**
- * Fetches a single canvas product by slug, including full details, image gallery, and size variants.
- * 
- * @param {string} slug - Product slug.
- * @param {Object} [headers={}] - Request headers.
- * @returns {Promise<Object|null>} Normalized product details or null.
+ * Query a single canvas by slug returning full details, image gallery, and size variants.
  */
-async function fetchProductBySlug(slug, headers = {}) {
-  const PRODUCT_BY_SLUG_QUERY = `
-    Query GetProductBySlug($slug: ID!) {
+async function fetchProductBySlug(slug) {
+  const query = `
+    query GetProductBySlug($slug: ID!) {
       product(id: $slug, idType: SLUG) {
         id
-        title
+        name
         slug
-        price
         description
-        shortDescription
         image {
           sourceUrl
+          altText
         }
         galleryImages {
           nodes {
             sourceUrl
           }
         }
+        ... on SimpleProduct {
+          price
+          regularPrice
+          salePrice
+        }
         ... on VariableProduct {
+          price
+          regularPrice
+          salePrice
           variations {
             nodes {
               id
@@ -198,29 +202,33 @@ async function fetchProductBySlug(slug, headers = {}) {
             }
           }
         }
-        attributes {
+        productCategories {
           nodes {
+            id
             name
-            options
-            label
+            slug
           }
         }
       }
     }
   `;
 
-  const data = await queryCMS(PRODUCT_BY_SLUG_QUERY, { slug }, headers);
-  
-  if (!data || !data.product) {
-    return null;
+  const data = await graphQLClient(query, { slug });
+  const productNode = data?.product;
+
+  if (!productNode) {
+    const error = new Error(`Product with slug "${slug}" not found`);
+    error.statusCode = 404;
+    throw error;
   }
 
-  return normalizeProduct(data.product);
+  return normalizeProductDetail(productNode);
 }
 
 module.exports = {
-  queryCMS,
+  graphQLClient,
   fetchProducts,
   fetchProductBySlug,
   normalizeProduct,
+  normalizeProductDetail
 };
