@@ -70,19 +70,28 @@ function executeTool(name, args) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function sendWithRetry(chatSession, payload, maxRetries = 4) {
+async function sendWithRetry(chatSession, payload, maxRetries = 5) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await chatSession.sendMessage(payload);
     } catch (err) {
-      const is429 = err.status === 429 || (err.message && err.message.includes("429"));
-      if (is429 && attempt < maxRetries) {
-        const retryDelayMatch = err.message?.match(/retry in ([0-9.]+)s/);
-        const waitMs = retryDelayMatch 
-          ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
-          : attempt * 15000;
+      const status = err.status || err.code;
+      const isRateLimit = status === 429 || (err.message && err.message.includes("429"));
+      const isServerTransient = status === 503 || status === 500 || (err.message && (err.message.includes("503") || err.message.includes("high demand")));
 
-        console.warn(`[429 Rate Limit] Backing off for ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+      if ((isRateLimit || isServerTransient) && attempt < maxRetries) {
+        let waitMs = attempt * 15000;
+
+        if (isRateLimit) {
+          const retryDelayMatch = err.message?.match(/retry in ([0-9.]+)s/);
+          waitMs = retryDelayMatch 
+            ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
+            : waitMs;
+          console.warn(`[429 Rate Limit] Backing off for ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+        } else {
+          console.warn(`[503 Server Busy] High demand spike. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+        }
+
         await sleep(waitMs);
         continue;
       }
