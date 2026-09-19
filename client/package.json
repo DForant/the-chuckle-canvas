@@ -1,0 +1,10 @@
+{
+  "name": "client",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "echo \"no client dev script yet\"",
+    "build": "echo \"no client build script yet\"",
+    "test": "echo \"no client test script yet\""
+  }
+}
