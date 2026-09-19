@@ -71,7 +71,7 @@ function executeTool(name, args) {
 
 async function runAgentTurn(systemPrompt, userPrompt) {
   const session = ai.chats.create({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.6-flash",
     config: {
       systemInstruction: systemPrompt,
       tools: tools
