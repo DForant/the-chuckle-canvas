@@ -127,6 +127,7 @@ async function runAgentTurn(systemPrompt, userPrompt) {
 
   return response.text;
 }
+}
 
 function extractScope(body) {
   const match = body.match(/###\s*Target Scope\s*\n+([^\n\r]+)/i);
