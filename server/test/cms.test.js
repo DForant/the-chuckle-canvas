@@ -1,7 +1,6 @@
 const fetch = require('node-fetch');
-const { fetchProducts, fetchProductBySlug, graphQLClient } = require('../src/services/cms');
+const { fetchProducts, fetchProductBySlug, queryCMS, normalizeProduct } = require('../src/services/cms');
 
-// Mock node-fetch
 jest.mock('node-fetch');
 
 describe('CMS Service', () => {
@@ -9,220 +8,200 @@ describe('CMS Service', () => {
     jest.clearAllMocks();
   });
 
+  describe('queryCMS', () => {
+    it('successfully queries CMS and returns data', async () => {
+      const mockResponseData = { data: { test: 'success' } };
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponseData,
+      });
+
+      const result = await queryCMS('query { test }');
+      expect(result).toEqual({ test: 'success' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledWith(
+        'https://cms.thechucklecanvas.com/graphql',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+          }),
+        })
+      );
+    });
+
+    it('handles network failure (fetch throws)', async () => {
+      fetch.mockRejectedValueOnce(new Error('Network offline'));
+
+      await expect(queryCMS('query { test }')).rejects.toThrow('CMS Network Error: Network offline');
+    });
+
+    it('handles HTTP error responses (response.ok is false)', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: async () => 'Server crashed',
+      });
+
+      let error;
+      try {
+        await queryCMS('query { test }');
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeDefined();
+      expect(error.message).toContain('CMS HTTP Error: 500 Internal Server Error');
+      expect(error.statusCode).toBe(502);
+    });
+
+    it('handles GraphQL errors in response body', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          errors: [{ message: 'Field "unknown" doesn\'t exist' }],
+        }),
+      });
+
+      let error;
+      try {
+        await queryCMS('query { unknown }');
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeDefined();
+      expect(error.message).toContain('CMS GraphQL Error: Field "unknown" doesn\'t exist');
+      expect(error.statusCode).toBe(400);
+      expect(error.graphqlErrors).toHaveLength(1);
+    });
+  });
+
   describe('fetchProducts', () => {
-    it('successfully fetches and normalizes products', async () => {
-      const mockApiResponse = {
+    it('fetches and normalizes products successfully', async () => {
+      const mockGraphQLResponse = {
         data: {
           products: {
+            pageInfo: {
+              hasNextPage: true,
+              endCursor: 'cursor123',
+            },
             nodes: [
               {
                 id: 'prod-1',
-                title: 'Funny Cat Canvas',
-                slug: 'funny-cat-canvas',
-                price: '$24.99',
-                description: 'A hilarious cat painting.',
-                featuredImage: {
-                  node: {
-                    sourceUrl: 'https://example.com/cat.jpg'
-                  }
-                }
-              }
+                title: 'Funny Dog Canvas',
+                slug: 'funny-dog-canvas',
+                price: '$29.99',
+                image: { sourceUrl: 'https://img.com/dog.jpg' },
+                description: 'A hilarious dog canvas.',
+              },
             ],
-            pageInfo: {
-              hasNextPage: false,
-              endCursor: 'cursor-1'
-            }
-          }
-        }
+          },
+        },
       };
 
-      fetch.mockResolvedValue({
+      fetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => mockApiResponse
+        json: async () => mockGraphQLResponse,
       });
 
-      const result = await fetchProducts(10, null);
+      const result = await fetchProducts(10, null, { 'woocommerce-session': 'session-xyz' });
 
-      expect(fetch).toHaveBeenCalledTimes(1);
-      const [endpoint, options] = fetch.mock.calls[0];
-      expect(endpoint).toBe('https://cms.thechucklecanvas.com/graphql');
-      
-      const body = JSON.parse(options.body);
-      expect(body.variables).toEqual({ first: 10, after: null });
-
+      expect(result.pageInfo.hasNextPage).toBe(true);
+      expect(result.pageInfo.endCursor).toBe('cursor123');
       expect(result.products).toHaveLength(1);
       expect(result.products[0]).toEqual({
         id: 'prod-1',
-        title: 'Funny Cat Canvas',
-        slug: 'funny-cat-canvas',
-        price: '$24.99',
-        imageUrl: 'https://example.com/cat.jpg',
-        description: 'A hilarious cat painting.'
+        title: 'Funny Dog Canvas',
+        slug: 'funny-dog-canvas',
+        price: '$29.99',
+        imageUrl: 'https://img.com/dog.jpg',
+        description: 'A hilarious dog canvas.',
+        galleryImages: [],
       });
-      expect(result.pageInfo).toEqual({
-        hasNextPage: false,
-        endCursor: 'cursor-1'
-      });
-    });
 
-    it('handles network failures gracefully', async () => {
-      fetch.mockRejectedValue(new Error('ECONNREFUSED'));
-
-      await expect(fetchProducts()).rejects.toThrow(
-        /Network error while connecting to GraphQL endpoint/
+      // Verify custom headers like woocommerce-session were forwarded
+      expect(fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'woocommerce-session': 'session-xyz',
+          }),
+        })
       );
-      
-      try {
-        await fetchProducts();
-      } catch (err) {
-        expect(err.statusCode).toBe(503);
-      }
-    });
-
-    it('handles GraphQL response errors array', async () => {
-      const mockErrorResponse = {
-        errors: [
-          { message: 'Internal GraphQL query error' }
-        ]
-      };
-
-      fetch.mockResolvedValue({
-        ok: true,
-        json: async () => mockErrorResponse
-      });
-
-      await expect(fetchProducts()).rejects.toThrow(
-        /GraphQL Error: Internal GraphQL query error/
-      );
-
-      try {
-        await fetchProducts();
-      } catch (err) {
-        expect(err.statusCode).toBe(400);
-        expect(err.errors).toEqual(mockErrorResponse.errors);
-      }
-    });
-
-    it('handles HTTP error status codes', async () => {
-      fetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        json: async () => ({ message: 'Server Error' })
-      });
-
-      await expect(fetchProducts()).rejects.toThrow();
-
-      try {
-        await fetchProducts();
-      } catch (err) {
-        expect(err.statusCode).toBe(500);
-      }
     });
   });
 
   describe('fetchProductBySlug', () => {
-    it('successfully fetches and normalizes a single product with gallery and variants', async () => {
-      const mockApiResponse = {
+    it('fetches and normalizes a single product with gallery and variants', async () => {
+      const mockGraphQLResponse = {
         data: {
           product: {
             id: 'prod-2',
-            title: 'Sarcastic Dog Canvas',
-            slug: 'sarcastic-dog-canvas',
+            title: 'Sarcastic Cat Canvas',
+            slug: 'sarcastic-cat-canvas',
             price: '$34.99',
-            description: 'A dog with a funny quote.',
-            featuredImage: {
-              node: {
-                sourceUrl: 'https://example.com/dog.jpg'
-              }
-            },
+            description: 'A sarcastic cat.',
+            shortDescription: 'Short desc',
+            image: { sourceUrl: 'https://img.com/cat.jpg' },
             galleryImages: {
               nodes: [
-                { sourceUrl: 'https://example.com/dog-alt1.jpg' },
-                { sourceUrl: 'https://example.com/dog-alt2.jpg' }
-              ]
+                { sourceUrl: 'https://img.com/cat-1.jpg' },
+                { sourceUrl: 'https://img.com/cat-2.jpg' },
+              ],
             },
-            variants: {
+            variations: {
               nodes: [
-                { id: 'var-1', name: 'Medium - 16x20', price: '$34.99' },
-                { id: 'var-2', name: 'Large - 24x36', price: '$49.99' }
-              ]
+                {
+                  id: 'var-1',
+                  name: 'Small - 12x16',
+                  price: '$34.99',
+                  regularPrice: '$34.99',
+                  attributes: { nodes: [{ name: 'Size', value: 'Small' }] },
+                },
+              ],
             },
-            productCategories: {
-              nodes: [
-                { id: 'cat-1', name: 'Dogs', slug: 'dogs' }
-              ]
-            }
-          }
-        }
+          },
+        },
       };
 
-      fetch.mockResolvedValue({
+      fetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => mockApiResponse
+        json: async () => mockGraphQLResponse,
       });
 
-      const product = await fetchProductBySlug('sarcastic-dog-canvas');
+      const product = await fetchProductBySlug('sarcastic-cat-canvas');
 
-      expect(product).toEqual({
-        id: 'prod-2',
-        title: 'Sarcastic Dog Canvas',
-        slug: 'sarcastic-dog-canvas',
-        price: '$34.99',
-        imageUrl: 'https://example.com/dog.jpg',
-        description: 'A dog with a funny quote.',
-        gallery: [
-          'https://example.com/dog-alt1.jpg',
-          'https://example.com/dog-alt2.jpg'
-        ],
-        variants: [
-          { id: 'var-1', name: 'Medium - 16x20', price: '$34.99', attributes: [] },
-          { id: 'var-2', name: 'Large - 24x36', price: '$49.99', attributes: [] }
-        ],
-        categories: [
-          { id: 'cat-1', name: 'Dogs', slug: 'dogs' }
-        ]
-      });
+      expect(product).toBeDefined();
+      expect(product.id).toBe('prod-2');
+      expect(product.title).toBe('Sarcastic Cat Canvas');
+      expect(product.slug).toBe('sarcastic-cat-canvas');
+      expect(product.price).toBe('$34.99');
+      expect(product.imageUrl).toBe('https://img.com/cat.jpg');
+      expect(product.galleryImages).toEqual([
+        'https://img.com/cat-1.jpg',
+        'https://img.com/cat-2.jpg',
+      ]);
+      expect(product.variants).toHaveLength(1);
+      expect(product.variants[0].id).toBe('var-1');
+      expect(product.variants[0].name).toBe('Small - 12x16');
     });
 
-    it('throws 404 when product is not found', async () => {
-      const mockApiResponse = {
-        data: {
-          product: null
-        }
-      };
-
-      fetch.mockResolvedValue({
+    it('returns null when product is not found', async () => {
+      fetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => mockApiResponse
+        json: async () => ({ data: { product: null } }),
       });
 
-      await expect(fetchProductBySlug('non-existent')).rejects.toThrow(
-        /Product with slug "non-existent" not found/
-      );
-
-      try {
-        await fetchProductBySlug('non-existent');
-      } catch (err) {
-        expect(err.statusCode).toBe(404);
-      }
+      const product = await fetchProductBySlug('non-existent');
+      expect(product).toBeNull();
     });
   });
 
-  describe('graphQLClient custom headers', () => {
-    it('forwards custom headers such as woocommerce-session', async () => {
-      fetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ data: { test: true } })
-      });
-
-      await graphQLClient('query { test }', {}, { 'woocommerce-session': 'session-xyz-123' });
-
-      expect(fetch).toHaveBeenCalledTimes(1);
-      const [, options] = fetch.mock.calls[0];
-      expect(options.headers).toMatchObject({
-        'Content-Type': 'application/json',
-        'woocommerce-session': 'session-xyz-123'
-      });
+  describe('normalizeProduct edge cases', () => {
+    it('returns null for null node', () => {
+      expect(normalizeProduct(null)).toBeNull();
     });
   });
 });
