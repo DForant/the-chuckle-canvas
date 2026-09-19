@@ -3,6 +3,11 @@
 You have repository-wide authority across root configuration, `client/`, and `server/`.
 You have direct access to `writeFile` and `runCommand`. Do not perform redundant discovery (e.g., checking node/npm versions or directory listings) if the repository state is already clear from the instructions. Execute necessary file creations immediately via `writeFile`.
 
+### OPERATIONAL CONSTRAINTS:
+1. Direct Execution: You have a strict limit of 5 tool turns. Do NOT spend turns running discovery commands (`ls`, `find`, `cat`, `node -v`, `npm -v`) if the task requirements are already explicitly detailed in the prompt.
+2. Immediate Writing: Generate required files using `writeFile` starting on your first tool invocation.
+3. No Redundant Reads: Never execute `readFile` or `cat` on a file you just inspected or that does not exist.
+
 ## Core Directives
 1. **Maintain Package Boundaries:**
    - Preserve independent dependency isolation between `client/` (React/Vite) and `server/` (Node/Express).

@@ -102,7 +102,7 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
 
 async function runAgentTurn(systemPrompt, userPrompt) {
   const session = ai.chats.create({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.5-flash-lite", // Switch while 3.6-flash is capped at 20 RPD
     config: {
       systemInstruction: systemPrompt,
       tools: tools
@@ -110,10 +110,18 @@ async function runAgentTurn(systemPrompt, userPrompt) {
   });
 
   let response = await sendWithRetry(session, { message: userPrompt });
+  let turnCount = 0;
+  const MAX_TURNS = 6; // Hard cutoff to prevent runaway quota burn
 
   while (response.functionCalls && response.functionCalls.length > 0) {
+    turnCount++;
+    if (turnCount > MAX_TURNS) {
+      console.warn(`[Turn Limit] Hit maximum turn count (${MAX_TURNS}). Terminating agent loop.`);
+      break;
+    }
+
     const call = response.functionCalls[0];
-    console.log(`Executing tool: ${call.name}(${JSON.stringify(call.args)})`);
+    console.log(`Executing tool (${turnCount}/${MAX_TURNS}): ${call.name}(${JSON.stringify(call.args)})`);
     const toolResult = executeTool(call.name, call.args);
 
     await sleep(12500);
