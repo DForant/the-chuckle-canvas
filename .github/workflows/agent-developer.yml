@@ -33,7 +33,7 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
         run: node .github/scripts/run-agent.mjs
 
-      - - name: Push Branch & Create PR
+      - name: Push Branch & Create PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ github.event.issue.number }}
