@@ -5,7 +5,7 @@ const fetch = require('node-fetch');
  * 
  * @param {string} query - GraphQL query or mutation string.
  * @param {Object} [variables={}] - Query variables.
- * @param {Object} [headers={}] - Additional headers (e.g. woocommerce-session).
+ * @param {Object} [headers={}] - Additional headers.
  * @returns {Promise<Object>} - The data object from the GraphQL response.
  */
 async function graphQLClient(query, variables = {}, headers = {}) {
@@ -40,15 +40,16 @@ async function graphQLClient(query, variables = {}, headers = {}) {
   }
 
   if (!response.ok) {
-    const error = new Error(result.message || `GraphQL request failed with status ${response.status}`);
+    const errorMsg = result.message || (result.errors && result.errors[0]?.message) || `GraphQL request failed with status ${response.status}`;
+    const error = new Error(errorMsg);
     error.statusCode = response.status;
+    error.errors = result.errors;
     throw error;
   }
 
   if (result.errors && result.errors.length > 0) {
     const errorMessages = result.errors.map(e => e.message).join(', ');
     const error = new Error(`GraphQL Error: ${errorMessages}`);
-    // Check if error is related to not found (e.g. product not found)
     if (errorMessages.toLowerCase().includes('not found') || errorMessages.toLowerCase().includes('does not exist')) {
       error.statusCode = 404;
     } else {
@@ -67,22 +68,16 @@ async function graphQLClient(query, variables = {}, headers = {}) {
 function normalizeProduct(node) {
   if (!node) return null;
 
-  // Handle WPGraphQL price formats (e.g., "$19.99" or formatted string or numeric)
-  let price = node.price || node.regularPrice || node.salePrice || '0.00';
-  if (node.rawPrice) {
-    price = node.rawPrice;
-  }
-
-  // Handle image URL from featuredImage
-  let imageUrl = node.image?.sourceUrl || node.featuredImage?.node?.sourceUrl || '';
+  let price = node.price || node.regularPrice || null;
+  let imageUrl = node.image?.sourceUrl || '';
 
   return {
     id: node.id,
-    title: node.title || node.name || '',
+    title: node.name || '',
     slug: node.slug || '',
     price,
     imageUrl,
-    description: node.description || node.shortDescription || ''
+    description: node.description || ''
   };
 }
 
@@ -94,28 +89,18 @@ function normalizeProductDetail(node) {
 
   const baseProduct = normalizeProduct(node);
 
-  // Gallery images
   let gallery = [];
   if (node.galleryImages?.nodes) {
     gallery = node.galleryImages.nodes.map(img => img.sourceUrl).filter(Boolean);
-  } else if (node.imageGallery?.nodes) {
-    gallery = node.imageGallery.nodes.map(img => img.sourceUrl).filter(Boolean);
   }
 
-  // Variants (e.g., variable products or attributes)
   let variants = [];
-  if (node.variants?.nodes) {
-    variants = node.variants.nodes.map(v => ({
+  if (node.variations?.nodes) {
+    variants = node.variations.nodes.map(v => ({
       id: v.id,
-      name: v.name || v.title || '',
+      name: v.name || '',
       price: v.price || v.regularPrice || baseProduct.price,
-      attributes: v.attributes?.nodes || v.attributes || []
-    }));
-  } else if (node.attributes?.nodes) {
-    variants = node.attributes.nodes.map(attr => ({
-      id: attr.id || attr.name,
-      name: attr.name,
-      options: attr.options || []
+      attributes: v.attributes?.nodes || []
     }));
   }
 
@@ -128,45 +113,43 @@ function normalizeProductDetail(node) {
 }
 
 /**
- * Fetch published products returning { id, title, slug, price, imageUrl, description }.
- * 
- * @param {number} [first=20] - Number of products to fetch.
- * @param {string} [after] - Cursor for pagination.
- * @returns {Promise<{ products: Array, pageInfo: Object }>}
+ * Fetch published products returning { products: Array, pageInfo: Object }.
  */
 async function fetchProducts(first = 20, after = null) {
   const query = `
     query GetProducts($first: Int!, $after: String) {
       products(first: $first, after: $after, where: { status: "PUBLISH" }) {
-        nodes {
-          id
-          title
-          slug
-          price
-          regularPrice
-          salePrice
-          description
-          shortDescription
-          featuredImage {
-            node {
-              sourceUrl
-            }
-          }
-          image {
-            sourceUrl
-          }
-        }
         pageInfo {
           hasNextPage
           endCursor
+        }
+        nodes {
+          id
+          databaseId
+          name
+          slug
+          description
+          image {
+            sourceUrl
+            altText
+          }
+          ... on SimpleProduct {
+            price
+            regularPrice
+            salePrice
+          }
+          ... on VariableProduct {
+            price
+            regularPrice
+            salePrice
+          }
         }
       }
     }
   `;
 
   const data = await graphQLClient(query, { first, after });
-  const productConnection = data.products || { nodes: [], pageInfo: {} };
-  
+  const productConnection = data?.products || { nodes: [], pageInfo: {} };
   const products = (productConnection.nodes || []).map(normalizeProduct);
 
   return {
@@ -177,55 +160,46 @@ async function fetchProducts(first = 20, after = null) {
 
 /**
  * Query a single canvas by slug returning full details, image gallery, and size variants.
- * 
- * @param {string} slug - Product slug.
- * @returns {Promise<Object|null>}
  */
 async function fetchProductBySlug(slug) {
   const query = `
     query GetProductBySlug($slug: ID!) {
       product(id: $slug, idType: SLUG) {
         id
-        title
+        name
         slug
-        price
-        regularPrice
-        salePrice
         description
-        shortDescription
-        featuredImage {
-          node {
-            sourceUrl
-          }
-        }
         image {
-          node {
-            sourceUrl
-          }
+          sourceUrl
+          altText
         }
         galleryImages {
           nodes {
             sourceUrl
           }
         }
-        imageGallery {
-          nodes {
-            sourceUrl
-          }
+        ... on SimpleProduct {
+          price
+          regularPrice
+          salePrice
         }
-        variants {
-          nodes {
-            id
-            name
-            price
-            regularPrice
-          }
-        }
-        attributes {
-          nodes {
-            id
-            name
-            options
+        ... on VariableProduct {
+          price
+          regularPrice
+          salePrice
+          variations {
+            nodes {
+              id
+              name
+              price
+              regularPrice
+              attributes {
+                nodes {
+                  name
+                  value
+                }
+              }
+            }
           }
         }
         productCategories {
@@ -240,7 +214,7 @@ async function fetchProductBySlug(slug) {
   `;
 
   const data = await graphQLClient(query, { slug });
-  const productNode = data.product;
+  const productNode = data?.product;
 
   if (!productNode) {
     const error = new Error(`Product with slug "${slug}" not found`);
