@@ -25,12 +25,9 @@ jobs:
 
       - name: Install Monorepo Dependencies
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci || npm install
-          else
-            npm install
-          fi
-          
+          npm install
+          npm install @google/genai
+
       - name: Execute Orchestrator
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
