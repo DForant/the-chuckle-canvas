@@ -70,6 +70,31 @@ function executeTool(name, args) {
 }
 
 async function runAgentTurn(systemPrompt, userPrompt) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function sendWithRetry(chatSession, payload, maxRetries = 4) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await chatSession.sendMessage(payload);
+    } catch (err) {
+      const is429 = err.status === 429 || (err.message && err.message.includes("429"));
+      if (is429 && attempt < maxRetries) {
+        // Extract server retry delay or default to 15s exponential backoff
+        const retryDelayMatch = err.message?.match(/retry in ([0-9.]+)s/);
+        const waitMs = retryDelayMatch 
+          ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
+          : attempt * 15000;
+
+        console.warn(`[429 Rate Limit] Backing off for ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+        await sleep(waitMs);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+async function runAgentTurn(systemPrompt, userPrompt) {
   const session = ai.chats.create({
     model: "gemini-3.6-flash",
     config: {
@@ -78,13 +103,17 @@ async function runAgentTurn(systemPrompt, userPrompt) {
     }
   });
 
-  let response = await session.sendMessage({ message: userPrompt });
+  let response = await sendWithRetry(session, { message: userPrompt });
 
   while (response.functionCalls && response.functionCalls.length > 0) {
     const call = response.functionCalls[0];
+    console.log(`Executing tool: ${call.name}(${JSON.stringify(call.args)})`);
     const toolResult = executeTool(call.name, call.args);
 
-    response = await session.sendMessage({
+    // Prevent bursting over the 5 RPM window
+    await sleep(12500);
+
+    response = await sendWithRetry(session, {
       message: [
         {
           functionResponse: {
