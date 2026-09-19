@@ -1,5 +1,17 @@
 {
+  "name": "the-chuckle-canvas",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces"
+  },
   "devDependencies": {
-    "@google/genai": "^2.23.0"
+    "concurrently": "^8.2.2"
   }
 }

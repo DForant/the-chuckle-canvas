@@ -1,1 +1,32 @@
-ror
+# Dependencies
+node_modules/
+/client/node_modules/
+/server/node_modules/
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# The ror folder and its contents
+ror/
+/ror/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
