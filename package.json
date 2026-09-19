@@ -1,4 +1,16 @@
 {
+  "name": "the-chuckle-canvas-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
   "devDependencies": {
     "@google/genai": "^2.23.0"
   }
