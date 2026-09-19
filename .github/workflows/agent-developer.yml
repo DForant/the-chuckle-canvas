@@ -33,7 +33,7 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
         run: node .github/scripts/run-agent.mjs
 
-      - name: Push Branch & Create PR
+      - - name: Push Branch & Create PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ github.event.issue.number }}
@@ -41,12 +41,22 @@ jobs:
           BRANCH="ai/issue-${ISSUE_NUM}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b $BRANCH
-          git add client/ server/
-          git commit -m "feat: automated changes for issue #${ISSUE_NUM}" || exit 0
-          git push origin $BRANCH
+          git checkout -b "$BRANCH"
+          
+          # Stage all repository changes across root and subdirectories
+          git add -A
+
+          # Exit cleanly if no changes were made
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "feat: automated changes for issue #${ISSUE_NUM}"
+          git push -u origin "$BRANCH"
+
           gh pr create \
-            --title "AI: ${{ github.event.issue.title }}" \
+            --title "AI: Monorepo Root & Workspace Architecture" \
             --body "Resolves #${ISSUE_NUM}. Scope handled automatically by AI Studio Orchestrator." \
             --base main \
-            --head $BRANCH
+            --head "$BRANCH"
