@@ -37,26 +37,37 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
           BRANCH="ai/issue-${ISSUE_NUM}"
+          
+          # 1. Resolve default base branch dynamically (handles main vs master)
+          DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
+
+          # 2. Make sure local ref has the remote default branch to calculate divergence
+          git fetch origin "$DEFAULT_BRANCH":"$DEFAULT_BRANCH"
+
+          # 3. Create or reset the branch explicitly against the default branch
+          git checkout -B "$BRANCH" "origin/$DEFAULT_BRANCH"
           
-          # Stage all repository changes across root and subdirectories
+          # Stage all repository changes
           git add -A
 
-          # Exit cleanly if no changes were made
+          # Exit cleanly if no changes were generated
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
 
           git commit -m "feat: automated changes for issue #${ISSUE_NUM}"
-          git push -u origin "$BRANCH"
+          git push -u origin "$BRANCH" --force
 
+          # 4. Open the Pull Request against the resolved base branch
           gh pr create \
-            --title "AI: Monorepo Root & Workspace Architecture" \
+            --title "AI: ${ISSUE_TITLE}" \
             --body "Resolves #${ISSUE_NUM}. Scope handled automatically by AI Studio Orchestrator." \
-            --base main \
+            --base "$DEFAULT_BRANCH" \
             --head "$BRANCH"
