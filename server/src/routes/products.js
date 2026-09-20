@@ -1,4 +1,3 @@
-const { default: test } = require('node:test');
 const express = require('express');
 const { fetchProducts, fetchProductBySlug } = require('../services/cms');
 
