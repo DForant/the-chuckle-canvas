@@ -47,10 +47,18 @@ async function graphQLClient(query, variables = {}, headers = {}) {
     throw error;
   }
 
-  if (result.errors && result.errors.length > 0) {
+if (result.errors && result.errors.length > 0) {
     const errorMessages = result.errors.map(e => e.message).join(', ');
     const error = new Error(`GraphQL Error: ${errorMessages}`);
-    if (errorMessages.toLowerCase().includes('not found') || errorMessages.toLowerCase().includes('does not exist')) {
+    
+    const lower = errorMessages.toLowerCase();
+    // Catch WooGraphQL phrasing: "No product ID was found", "not found", "does not exist"
+    if (
+      lower.includes('not found') || 
+      lower.includes('does not exist') || 
+      lower.includes('no product') ||
+      (lower.includes('found') && lower.includes('slug'))
+    ) {
       error.statusCode = 404;
     } else {
       error.statusCode = 400;
@@ -58,7 +66,7 @@ async function graphQLClient(query, variables = {}, headers = {}) {
     error.errors = result.errors;
     throw error;
   }
-
+  
   return result.data;
 }
 
