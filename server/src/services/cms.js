@@ -1,242 +1,217 @@
-const fetch = require('node-fetch');
+import fetch from "node-fetch";
 
-/**
- * Lightweight GraphQL client function for querying WPGraphQL.
- * 
- * @param {string} query - GraphQL query or mutation string.
- * @param {Object} [variables={}] - Query variables.
- * @param {Object} [headers={}] - Additional headers.
- * @returns {Promise<Object>} - The data object from the GraphQL response.
- */
-async function graphQLClient(query, variables = {}, headers = {}) {
-  const endpoint = process.env.GRAPHQL_ENDPOINT || 'https://cms.thechucklecanvas.com/graphql';
-
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers
-      },
-      body: JSON.stringify({
-        query,
-        variables
-      })
-    });
-  } catch (networkError) {
-    const error = new Error(`Network error while connecting to GraphQL endpoint: ${networkError.message}`);
-    error.statusCode = 503;
-    throw error;
+export class ProductNotFoundError extends Error {
+  constructor(message = "Product not found") {
+    super(message);
+    this.name = "ProductNotFoundError";
+    this.status = 404;
   }
+}
 
-  let result;
-  try {
-    result = await response.json();
-  } catch (jsonError) {
-    const error = new Error('Invalid JSON response from GraphQL endpoint');
-    error.statusCode = 502;
-    throw error;
+export const MEDIA_ITEM_FRAGMENT = `
+  fragment MediaItemFragment on MediaItem {
+    id
+    sourceUrl
+    altText
   }
+`;
 
-  if (!response.ok) {
-    const errorMsg = result.message || (result.errors && result.errors[0]?.message) || `GraphQL request failed with status ${response.status}`;
-    const error = new Error(errorMsg);
-    error.statusCode = response.status;
-    error.errors = result.errors;
-    throw error;
-  }
-
-if (result.errors && result.errors.length > 0) {
-    const errorMessages = result.errors.map(e => e.message).join(', ');
-    const error = new Error(`GraphQL Error: ${errorMessages}`);
-    
-    const lower = errorMessages.toLowerCase();
-    // Catch WooGraphQL phrasing: "No product ID was found", "not found", "does not exist"
-    if (
-      lower.includes('not found') || 
-      lower.includes('does not exist') || 
-      lower.includes('no product') ||
-      (lower.includes('found') && lower.includes('slug'))
-    ) {
-      error.statusCode = 404;
-    } else {
-      error.statusCode = 400;
+export const PRODUCT_PRICING_FRAGMENT = `
+  fragment ProductPricingFragment on Product {
+    ... on SimpleProduct {
+      price(format: FORMATTED)
+      rawPrice: price(format: RAW)
+      regularPrice(format: FORMATTED)
+      salePrice(format: FORMATTED)
+      onSale
+      stockStatus
+      stockQuantity
     }
-    error.errors = result.errors;
-    throw error;
+    ... on VariableProduct {
+      price(format: FORMATTED)
+      rawPrice: price(format: RAW)
+      regularPrice(format: FORMATTED)
+      salePrice(format: FORMATTED)
+      onSale
+      stockStatus
+    }
   }
-  
-  return result.data;
-}
+`;
 
-/**
- * Normalizes a WPGraphQL product node into standard format.
- */
-function normalizeProduct(node) {
-  if (!node) return null;
-
-  let price = node.price || node.regularPrice || null;
-  let imageUrl = node.image?.sourceUrl || '';
-
-  return {
-    id: node.id,
-    title: node.name || '',
-    slug: node.slug || '',
-    price,
-    imageUrl,
-    description: node.description || ''
-  };
-}
-
-/**
- * Normalizes a single detailed product including image gallery and size variants.
- */
-function normalizeProductDetail(node) {
-  if (!node) return null;
-
-  const baseProduct = normalizeProduct(node);
-
-  let gallery = [];
-  if (node.galleryImages?.nodes) {
-    gallery = node.galleryImages.nodes.map(img => img.sourceUrl).filter(Boolean);
+export const VARIATION_NODE_FRAGMENT = `
+  fragment VariationNodeFragment on ProductVariation {
+    id
+    databaseId
+    name
+    price(format: FORMATTED)
+    regularPrice(format: FORMATTED)
+    salePrice(format: FORMATTED)
+    stockStatus
+    stockQuantity
+    attributes {
+      nodes {
+        name
+        value
+        label
+      }
+    }
+    image {
+      ...MediaItemFragment
+    }
   }
+`;
 
-  let variants = [];
-  if (node.variations?.nodes) {
-    variants = node.variations.nodes.map(v => ({
-      id: v.id,
-      name: v.name || '',
-      price: v.price || v.regularPrice || baseProduct.price,
-      attributes: v.attributes?.nodes || []
-    }));
-  }
+export const GET_PRODUCT_BY_SLUG_QUERY = `
+  ${MEDIA_ITEM_FRAGMENT}
+  ${PRODUCT_PRICING_FRAGMENT}
+  ${VARIATION_NODE_FRAGMENT}
 
-  return {
-    ...baseProduct,
-    gallery,
-    variants,
-    categories: node.productCategories?.nodes?.map(c => ({ id: c.id, name: c.name, slug: c.slug })) || []
-  };
-}
-
-/**
- * Fetch published products returning { products: Array, pageInfo: Object }.
- */
-async function fetchProducts(first = 20, after = null) {
-  const query = `
-    query GetProducts($first: Int!, $after: String) {
-      products(first: $first, after: $after, where: { status: "PUBLISH" }) {
-        pageInfo {
-          hasNextPage
-          endCursor
+  query GetProductBySlug($slug: ID!) {
+    product(id: $slug, idType: SLUG) {
+      id
+      databaseId
+      slug
+      name
+      description
+      shortDescription
+      ...ProductPricingFragment
+      image {
+        ...MediaItemFragment
+      }
+      galleryImages {
+        nodes {
+          ...MediaItemFragment
         }
+      }
+      productCategories {
         nodes {
           id
           databaseId
           name
           slug
-          description
-          image {
-            sourceUrl
-            altText
-          }
-          ... on SimpleProduct {
-            price
-            regularPrice
-            salePrice
-          }
-          ... on VariableProduct {
-            price
-            regularPrice
-            salePrice
+        }
+      }
+      ... on VariableProduct {
+        variations(first: 50) {
+          nodes {
+            ...VariationNodeFragment
           }
         }
       }
     }
-  `;
+  }
+`;
 
-  const data = await graphQLClient(query, { first, after });
-  const productConnection = data?.products || { nodes: [], pageInfo: {} };
-  const products = (productConnection.nodes || []).map(normalizeProduct);
+export async function executeGraphQLQuery(query, variables) {
+  const endpoint = process.env.WP_GRAPHQL_URL;
+  if (!endpoint) {
+    throw new Error("WP_GRAPHQL_URL environment variable is not defined");
+  }
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upstream CMS network error: ${res.statusText}`);
+  }
+
+  return await res.json();
+}
+
+export function mapWooCommerceProduct(product) {
+  if (!product) return null;
 
   return {
-    products,
-    pageInfo: productConnection.pageInfo || {}
+    id: product.id,
+    databaseId: product.databaseId,
+    slug: product.slug,
+    name: product.name,
+    description: product.description,
+    shortDescription: product.shortDescription,
+    price: product.price || null,
+    regularPrice: product.regularPrice || null,
+    salePrice: product.salePrice || null,
+    onSale: Boolean(product.onSale),
+    stockStatus: product.stockStatus || null,
+    stockQuantity: product.stockQuantity !== undefined ? product.stockQuantity : null,
+    featuredImage: product.image
+      ? {
+          id: product.image.id,
+          sourceUrl: product.image.sourceUrl,
+          altText: product.image.altText || null,
+        }
+      : null,
+    galleryImages:
+      product.galleryImages && product.galleryImages.nodes
+        ? product.galleryImages.nodes.map((img) => ({
+            id: img.id,
+            sourceUrl: img.sourceUrl,
+            altText: img.altText || null,
+          }))
+        : [],
+    categories:
+      product.productCategories && product.productCategories.nodes
+        ? product.productCategories.nodes.map((cat) => ({
+            id: cat.id,
+            databaseId: cat.databaseId,
+            name: cat.name,
+            slug: cat.slug,
+          }))
+        : [],
+    variations:
+      product.variations && product.variations.nodes
+        ? product.variations.nodes.map((v) => ({
+            id: v.id,
+            databaseId: v.databaseId,
+            name: v.name,
+            price: v.price || null,
+            regularPrice: v.regularPrice || null,
+            salePrice: v.salePrice || null,
+            stockStatus: v.stockStatus || null,
+            stockQuantity: v.stockQuantity !== undefined ? v.stockQuantity : null,
+            attributes:
+              v.attributes && v.attributes.nodes
+                ? v.attributes.nodes.map((attr) => ({
+                    name: attr.name,
+                    value: attr.value,
+                    label: attr.label,
+                  }))
+                : [],
+            image: v.image
+              ? {
+                  id: v.image.id,
+                  sourceUrl: v.image.sourceUrl,
+                  altText: v.image.altText || null,
+                }
+              : null,
+          }))
+        : [],
   };
 }
 
-/**
- * Query a single canvas by slug returning full details, image gallery, and size variants.
- */
-async function fetchProductBySlug(slug) {
-  const query = `
-    query GetProductBySlug($slug: ID!) {
-      product(id: $slug, idType: SLUG) {
-        id
-        name
-        slug
-        description
-        image {
-          sourceUrl
-          altText
-        }
-        galleryImages {
-          nodes {
-            sourceUrl
-          }
-        }
-        ... on SimpleProduct {
-          price
-          regularPrice
-          salePrice
-        }
-        ... on VariableProduct {
-          price
-          regularPrice
-          salePrice
-          variations {
-            nodes {
-              id
-              name
-              price
-              regularPrice
-              attributes {
-                nodes {
-                  name
-                  value
-                }
-              }
-            }
-          }
-        }
-        productCategories {
-          nodes {
-            id
-            name
-            slug
-          }
-        }
-      }
+export async function fetchProductBySlug(slug) {
+  const response = await executeGraphQLQuery(GET_PRODUCT_BY_SLUG_QUERY, { slug });
+
+  if (response.errors && Array.isArray(response.errors)) {
+    const hasNotFoundError = response.errors.some(
+      (err) => typeof err.message === "string" && err.message.includes("No product ID was found")
+    );
+
+    if (hasNotFoundError) {
+      throw new ProductNotFoundError();
     }
-  `;
 
-  const data = await graphQLClient(query, { slug });
-  const productNode = data?.product;
-
-  if (!productNode) {
-    const error = new Error(`Product with slug "${slug}" not found`);
-    error.statusCode = 404;
-    throw error;
+    throw new Error(response.errors.map((e) => e.message).join(", "));
   }
 
-  return normalizeProductDetail(productNode);
-}
+  if (!response.data || !response.data.product) {
+    throw new ProductNotFoundError();
+  }
 
-module.exports = {
-  graphQLClient,
-  fetchProducts,
-  fetchProductBySlug,
-  normalizeProduct,
-  normalizeProductDetail
-};
+  return mapWooCommerceProduct(response.data.product);
+}

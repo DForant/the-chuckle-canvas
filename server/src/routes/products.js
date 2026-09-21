@@ -1,32 +1,35 @@
-const express = require('express');
-const { fetchProducts, fetchProductBySlug } = require('../services/cms');
+import express from "express";
+import { fetchProductBySlug, ProductNotFoundError } from "../services/cms.js";
 
 const router = express.Router();
 
-// GET /api/products
-router.get('/', async (req, res, next) => {
+router.get("/api/products/:slug", async (req, res, next) => {
   try {
-    const result = await fetchProducts();
-    res.status(200).json({ products: result.products });
-  } catch (err) {
-    next(err);
+    const { slug } = req.params;
+    if (!slug) {
+      return res.status(404).json({
+        error: { message: "Product not found", status: 404 }
+      });
+    }
+
+    const product = await fetchProductBySlug(slug);
+    return res.status(200).json(product);
+  } catch (error) {
+    if (error.status === 404 || error instanceof ProductNotFoundError || error.name === "ProductNotFoundError") {
+      return res.status(404).json({
+        error: {
+          message: "Product not found",
+          status: 404
+        }
+      });
+    }
+    return res.status(500).json({
+      error: {
+        message: "Internal server error",
+        status: 500
+      }
+    });
   }
 });
 
-// GET /api/products/:slug
-router.get('/:slug', async (req, res, next) => {
-  try {
-    const product = await fetchProductBySlug(req.params.slug);
-    if (!product) {
-      return res.status(404).json({ error: { message: 'Product not found', status: 404 } });
-    }
-    res.status(200).json(product);
-  } catch (err) {
-    if (err.statusCode === 404 || (err.message && err.message.toLowerCase().includes('not found'))) {
-      return res.status(404).json({ error: { message: err.message || 'Product not found', status: 404 } });
-    }
-    next(err);
-  }
-});
-
-module.exports = router;
+export default router;
