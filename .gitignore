@@ -20,6 +20,10 @@ out/
 ror/
 /ror/
 
+# VS Code
+.vscode/
+*.code-workspace
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
