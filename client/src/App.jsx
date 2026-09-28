@@ -1,168 +1,91 @@
-import React, { useState, useEffect } from 'react';
-import { Smile, RefreshCw, Sparkles, Send } from 'lucide-react';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import CatalogPage from './pages/CatalogPage';
+import { Smile, Sparkles } from 'lucide-react';
 
-export default function App() {
-  const [apiStatus, setApiStatus] = useState('checking');
-  const [jokes, setJokes] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [customJoke, setCustomJoke] = useState('');
-
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://stg.api.thechucklecanvas.com';
-
-  const checkApiHealth = async () => {
-    try {
-      setApiStatus('checking');
-      const response = await fetch(`${apiBaseUrl}/health`, {
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok || response.status < 500) {
-        setApiStatus('online');
-      } else {
-        setApiStatus('offline');
-      }
-    } catch (err) {
-      console.warn('API health check warning:', err);
-      // Fallback online simulation or offline based on network
-      setApiStatus('online'); 
-    }
-  };
-
-  useEffect(() => {
-    checkApiHealth();
-  }, []);
-
-  const fetchJokes = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiBaseUrl}/api/jokes`);
-      if (res.ok) {
-        const data = await res.json();
-        setJokes(data.jokes || data || []);
-      } else {
-        // Fallback mock jokes if endpoint is not fully scaffolded yet
-        setJokes([
-          { id: 1, text: "Why don't scientists trust atoms? Because they make up everything!" },
-          { id: 2, text: "Parallel lines have so much in common. It’s a shame they’ll never meet." }
-        ]);
-      }
-    } catch (err) {
-      setJokes([
-        { id: 1, text: "Why don't scientists trust atoms? Because they make up everything!" },
-        { id: 2, text: "Parallel lines have so much in common. It’s a shame they’ll never meet." }
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchJokes();
-  }, []);
-
-  const handleAddJoke = (e) => {
-    e.preventDefault();
-    if (!customJoke.trim()) return;
-    setJokes([{ id: Date.now(), text: customJoke }, ...jokes]);
-    setCustomJoke('');
-  };
+function Navigation() {
+  const location = useLocation();
+  const isActive = (path) => location.pathname === path;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex flex-col">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur sticky top-0 z-10 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="bg-indigo-600 text-white p-2.5 rounded-xl shadow-md">
-              <Smile className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 tracking-tight">The Chuckle Canvas</h1>
-              <p className="text-xs text-gray-500">Bring joy to your canvas</p>
-            </div>
+    <header className="border-b bg-white/80 backdrop-blur sticky top-0 z-50 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+        <Link to="/" className="flex items-center space-x-3 group">
+          <div className="bg-indigo-600 text-white p-3 rounded-2xl shadow-md group-hover:scale-105 transition-transform">
+            <Smile className="w-6 h-6" />
           </div>
-          <div className="flex items-center space-x-2 text-xs font-medium px-3 py-1.5 rounded-full bg-gray-100 border border-gray-200">
-            <span className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-            <span className="text-gray-700 capitalize">API: {apiStatus}</span>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight">The Chuckle Canvas</h1>
+            <p className="text-xs text-gray-500 font-medium">Headless WooCommerce Catalog</p>
           </div>
-        </div>
-      </header>
+        </Link>
 
-      {/* Main Content */}
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 space-y-8">
-        {/* Hero Banner */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl p-8 shadow-xl relative overflow-hidden">
-          <div className="absolute right-0 bottom-0 translate-x-8 translate-y-8 opacity-10">
-            <Sparkles className="w-64 h-64" />
-          </div>
-          <div className="relative z-10 max-w-xl">
-            <span className="inline-block bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full mb-3 backdrop-blur">
-              React + Tailwind CSS Client
-            </span>
-            <h2 className="text-3xl font-extrabold tracking-tight mb-3">
-              Canvas of Smiles & Chuckles
-            </h2>
-            <p className="text-indigo-100 text-sm leading-relaxed mb-6">
-              Connected seamlessly with <code className="bg-black/20 px-1.5 py-0.5 rounded text-xs">stg.api.thechucklecanvas.com</code>. Enjoy discovering and sharing great humor!
-            </p>
-            <button
-              onClick={fetchJokes}
-              disabled={loading}
-              className="inline-flex items-center space-x-2 bg-white text-indigo-600 font-semibold px-5 py-2.5 rounded-xl shadow-md hover:bg-indigo-50 transition transform active:scale-95 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              <span>{loading ? 'Refreshing...' : 'Get Fresh Chuckles'}</span>
-            </button>
-          </div>
-        </div>
+        <nav className="flex items-center space-x-2 sm:space-x-4">
+          <Link
+            to="/"
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
+              isActive('/') ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            Home
+          </Link>
+          <Link
+            to="/products"
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
+              isActive('/products') ? 'bg-indigo-50 text-indigo-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            Products
+          </Link>
+        </nav>
+      </div>
+    </header>
+  );
+}
 
-        {/* Add Custom Joke */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-          <h3 className="text-base font-semibold text-gray-800 mb-3">Add Your Own Chuckle</h3>
-          <form onSubmit={handleAddJoke} className="flex gap-3">
-            <input
-              type="text"
-              value={customJoke}
-              onChange={(e) => setCustomJoke(e.target.value)}
-              placeholder="Type a funny joke or punchline..."
-              className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-            />
-            <button
-              type="submit"
-              className="inline-flex items-center space-x-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-medium text-sm hover:bg-indigo-700 transition shadow-sm"
-            >
-              <Send className="w-4 h-4" />
-              <span>Share</span>
-            </button>
-          </form>
-        </div>
+function ProductDetailPlaceholder() {
+  const location = useLocation();
+  const slug = location.pathname.split('/').pop();
 
-        {/* Jokes Feed */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-bold text-gray-900">Recent Chuckles</h3>
-          {jokes.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-2xl border border-gray-100">
-              <p className="text-gray-500 text-sm">No chuckles found yet. Be the first to share one!</p>
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {jokes.map((joke) => (
-                <div key={joke.id || Math.random()} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition flex flex-col justify-between">
-                  <p className="text-gray-800 font-medium text-base mb-4">"{joke.text || joke}"</p>
-                  <div className="flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-gray-50">
-                    <span>#ChuckleCanvas</span>
-                    <button className="text-indigo-600 hover:text-indigo-800 font-medium">Like ❤️</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+  return (
+    <div className="max-w-4xl mx-auto py-16 px-4">
+      <div className="bg-white rounded-3xl p-8 sm:p-12 shadow-sm border border-gray-100 text-center space-y-6">
+        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto">
+          <Sparkles className="w-8 h-8" />
         </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-100 py-6 mt-12 text-center text-xs text-gray-500">
-        <p>&copy; {new Date().getFullYear()} The Chuckle Canvas. All rights reserved.</p>
-      </footer>
+        <h2 className="text-2xl font-bold text-gray-900">Canvas Detail: <span className="text-indigo-600 capitalize">{slug.replace(/-/g, ' ')}</span></h2>
+        <p className="text-gray-500 text-sm max-w-md mx-auto leading-relaxed">
+          You have successfully navigated to the product detail page! Fully responsive product inspection is ready.
+        </p>
+        <div>
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center bg-indigo-600 text-white font-semibold px-6 py-3 rounded-2xl text-sm hover:bg-indigo-700 transition shadow-sm"
+          >
+            Back to Catalog
+          </Link>
+        </div>
+      </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-white to-purple-50/50 flex flex-col font-sans">
+        <Navigation />
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <Routes>
+            <Route path="/" element={<CatalogPage />} />
+            <Route path="/products" element={<CatalogPage />} />
+            <Route path="/products/:slug" element={<ProductDetailPlaceholder />} />
+          </Routes>
+        </main>
+        <footer className="bg-white border-t border-gray-100 py-8 mt-16 text-center text-xs text-gray-500">
+          <p>&copy; {new Date().getFullYear()} The Chuckle Canvas. All rights reserved.</p>
+        </footer>
+      </div>
+    </Router>
   );
 }
