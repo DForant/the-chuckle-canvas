@@ -148,7 +148,7 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
 
 async function runAgentTurn(systemPrompt, userPrompt) {
   const session = ai.chats.create({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.5-flash-lite",
     config: {
       systemInstruction: systemPrompt,
       tools: tools
