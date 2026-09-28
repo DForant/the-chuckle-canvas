@@ -2,8 +2,44 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import { setGlobalDispatcher, Agent } from "undici";
+
+// Prevent HeadersTimeoutError / fetch failed on large inference turns
+setGlobalDispatcher(
+  new Agent({
+    headersTimeout: 900_000, // 15 minutes
+    bodyTimeout: 900_000,
+    connectTimeout: 60_000,
+  })
+);
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Disallowed directories and extensions to protect token context
+const BLOCKED_DIRECTORIES = ["node_modules", ".git", "dist", "build", "coverage", ".next"];
+const BLOCKED_EXTENSIONS = [
+  ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+  ".pdf", ".zip", ".tar", ".gz", ".lock", ".woff", ".woff2", ".ttf"
+];
+const BLOCKED_EXACT_FILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
+
+function isPathForbidden(filePath) {
+  const normalized = path.normalize(filePath).replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  const fileName = path.basename(normalized);
+  const ext = path.extname(normalized).toLowerCase();
+
+  if (segments.some((seg) => BLOCKED_DIRECTORIES.includes(seg))) {
+    return `Access denied: Directory in '${filePath}' is excluded from agent context.`;
+  }
+  if (BLOCKED_EXACT_FILES.includes(fileName)) {
+    return `Access denied: '${fileName}' is excluded due to token payload size.`;
+  }
+  if (BLOCKED_EXTENSIONS.includes(ext)) {
+    return `Access denied: Binary or static asset extension '${ext}' cannot be ingested.`;
+  }
+  return null;
+}
 
 const tools = [
   {
@@ -48,15 +84,30 @@ const tools = [
 
 function executeTool(name, args) {
   if (name === "readFile") {
-    return fs.existsSync(args.filePath)
-      ? fs.readFileSync(args.filePath, "utf8")
-      : `Error: File ${args.filePath} not found.`;
+    const violation = isPathForbidden(args.filePath);
+    if (violation) return violation;
+
+    if (!fs.existsSync(args.filePath)) {
+      return `Error: File ${args.filePath} not found.`;
+    }
+
+    const stats = fs.statSync(args.filePath);
+    if (stats.size > 250_000) {
+      return `Error: File ${args.filePath} exceeds maximum safety read limit (250KB).`;
+    }
+
+    return fs.readFileSync(args.filePath, "utf8");
   }
+
   if (name === "writeFile") {
+    const violation = isPathForbidden(args.filePath);
+    if (violation) return violation;
+
     fs.mkdirSync(path.dirname(args.filePath), { recursive: true });
     fs.writeFileSync(args.filePath, args.content, "utf8");
     return `Successfully written to ${args.filePath}`;
   }
+
   if (name === "runCommand") {
     try {
       const output = execSync(args.command, { encoding: "utf8", timeout: 60000 });
@@ -78,8 +129,11 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
       const status = err.status || err.code;
       const isRateLimit = status === 429 || (err.message && err.message.includes("429"));
       const isServerTransient = status === 503 || status === 500 || (err.message && (err.message.includes("503") || err.message.includes("high demand")));
+      const isTimeout =
+        err?.cause?.code === "UND_ERR_HEADERS_TIMEOUT" ||
+        (err?.message && err.message.includes("fetch failed"));
 
-      if ((isRateLimit || isServerTransient) && attempt < maxRetries) {
+      if ((isRateLimit || isServerTransient || isTimeout) && attempt < maxRetries) {
         let waitMs = attempt * 15000;
 
         if (isRateLimit) {
@@ -88,6 +142,8 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
             ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
             : waitMs;
           console.warn(`[429 Rate Limit] Backing off for ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+        } else if (isTimeout) {
+          console.warn(`[Network/Timeout] Undici fetch timeout. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
         } else {
           console.warn(`[503 Server Busy] High demand spike. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
         }
@@ -102,7 +158,7 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
 
 async function runAgentTurn(systemPrompt, userPrompt) {
   const session = ai.chats.create({
-    model: "gemini-3.5-flash-lite", // Switch while 3.6-flash is capped at 20 RPD
+    model: "gemini-2.5-flash",
     config: {
       systemInstruction: systemPrompt,
       tools: tools
@@ -111,7 +167,7 @@ async function runAgentTurn(systemPrompt, userPrompt) {
 
   let response = await sendWithRetry(session, { message: userPrompt });
   let turnCount = 0;
-  const MAX_TURNS = 18; // Hard cutoff to prevent runaway quota burn
+  const MAX_TURNS = 18;
 
   while (response.functionCalls && response.functionCalls.length > 0) {
     turnCount++;
