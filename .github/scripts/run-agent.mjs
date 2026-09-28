@@ -3,15 +3,6 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
-// Prevent HeadersTimeoutError / fetch failed on large inference turns
-setGlobalDispatcher(
-  new Agent({
-    headersTimeout: 900_000, // 15 minutes
-    bodyTimeout: 900_000,
-    connectTimeout: 60_000,
-  })
-);
-
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Disallowed directories and extensions to protect token context
@@ -128,11 +119,11 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
       const status = err.status || err.code;
       const isRateLimit = status === 429 || (err.message && err.message.includes("429"));
       const isServerTransient = status === 503 || status === 500 || (err.message && (err.message.includes("503") || err.message.includes("high demand")));
-      const isTimeout =
+      const isNetworkError =
         err?.cause?.code === "UND_ERR_HEADERS_TIMEOUT" ||
         (err?.message && err.message.includes("fetch failed"));
 
-      if ((isRateLimit || isServerTransient || isTimeout) && attempt < maxRetries) {
+      if ((isRateLimit || isServerTransient || isNetworkError) && attempt < maxRetries) {
         let waitMs = attempt * 15000;
 
         if (isRateLimit) {
@@ -141,8 +132,8 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
             ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
             : waitMs;
           console.warn(`[429 Rate Limit] Backing off for ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
-        } else if (isTimeout) {
-          console.warn(`[Network/Timeout] Undici fetch timeout. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+        } else if (isNetworkError) {
+          console.warn(`[Network/Timeout] Fetch connection error. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
         } else {
           console.warn(`[503 Server Busy] High demand spike. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
         }
