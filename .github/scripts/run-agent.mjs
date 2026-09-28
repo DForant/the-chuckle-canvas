@@ -2,7 +2,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import { setGlobalDispatcher, Agent } from "undici";
 
 // Prevent HeadersTimeoutError / fetch failed on large inference turns
 setGlobalDispatcher(
