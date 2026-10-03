@@ -3,6 +3,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 const productRouter = require('./routes/products');
+const orderRouter = require('./routes/orders');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -13,6 +14,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/products', productRouter);
+app.use('/api/orders', orderRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
