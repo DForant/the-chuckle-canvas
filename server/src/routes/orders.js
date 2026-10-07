@@ -5,13 +5,37 @@ const router = express.Router();
 // POST /api/orders
 router.post('/', (req, res, next) => {
   try {
-    const { customer, items, total } = req.body || {};
+    const { customer, items, total, payment } = req.body || {};
 
-    // Validate customer details
-    if (!customer || !customer.name || !customer.email || !customer.address) {
+    // Validate customer details & required fields requested by requirements
+    if (
+      !customer ||
+      !customer.firstName ||
+      !customer.lastName ||
+      !customer.email ||
+      !customer.shippingAddress1 ||
+      !customer.shippingCity ||
+      !customer.shippingState ||
+      !customer.shippingZip
+    ) {
       return res.status(400).json({
         error: {
-          message: 'Missing required customer details (name, email, address)',
+          message: 'Missing required customer shipping details (First Name, Last Name, Email Address, Shipping Address 1, City, State, Zip code)',
+          status: 400
+        }
+      });
+    }
+
+    // Validate payment details
+    if (
+      !payment ||
+      !payment.cardNumber ||
+      !payment.expirationDate ||
+      !payment.cvcCode
+    ) {
+      return res.status(400).json({
+        error: {
+          message: 'Missing required payment details (Card Number, Expiration Date, CVC Code)',
           status: 400
         }
       });
@@ -36,7 +60,10 @@ router.post('/', (req, res, next) => {
     res.status(201).json({
       orderId,
       status: 'received',
-      timestamp
+      timestamp,
+      customer,
+      items,
+      total: total || '0.00'
     });
   } catch (err) {
     next(err);
