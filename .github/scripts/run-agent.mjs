@@ -67,6 +67,17 @@ const tools = [
           },
           required: ["command"]
         }
+      },
+      {
+        name: "getGitDiff",
+        description: "Get the current git diff of files modified relative to the base branch",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            baseBranch: { type: Type.STRING, description: "Base branch to compare against (e.g. 'main')" }
+          },
+          required: ["baseBranch"]
+        }
       }
     ]
   }
@@ -106,6 +117,19 @@ function executeTool(name, args) {
       return `Failed:\n${err.stdout || err.message}`;
     }
   }
+
+  if (name === "getGitDiff") {
+    try {
+      const diff = execSync(`git diff origin/${args.baseBranch}...HEAD --stat -p`, {
+        encoding: "utf8",
+        maxBuffer: 1024 * 500
+      });
+      return diff.slice(0, 50000);
+    } catch (err) {
+      return `Error reading diff: ${err.message}`;
+    }
+  }
+
   throw new Error(`Unknown tool: ${name}`);
 }
 
@@ -124,18 +148,19 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
         (err?.message && err.message.includes("fetch failed"));
 
       if ((isRateLimit || isServerTransient || isNetworkError) && attempt < maxRetries) {
-        let waitMs = attempt * 15000;
+        const jitter = Math.floor(Math.random() * 3000);
+        let waitMs = attempt * 15000 + jitter;
 
         if (isRateLimit) {
           const retryDelayMatch = err.message?.match(/retry in ([0-9.]+)s/);
           waitMs = retryDelayMatch 
-            ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 
+            ? Math.ceil(parseFloat(retryDelayMatch[1]) * 1000) + 2000 + jitter
             : waitMs;
-          console.warn(`[429 Rate Limit] Backing off for ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+          console.warn(`[429 Rate Limit] Backing off for ${Math.round(waitMs / 1000)}s (Attempt ${attempt}/${maxRetries})...`);
         } else if (isNetworkError) {
-          console.warn(`[Network/Timeout] Fetch connection error. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+          console.warn(`[Network/Timeout] Fetch connection error. Retrying in ${Math.round(waitMs / 1000)}s (Attempt ${attempt}/${maxRetries})...`);
         } else {
-          console.warn(`[503 Server Busy] High demand spike. Retrying in ${waitMs / 1000}s (Attempt ${attempt}/${maxRetries})...`);
+          console.warn(`[503 Server Busy] High demand spike. Retrying in ${Math.round(waitMs / 1000)}s (Attempt ${attempt}/${maxRetries})...`);
         }
 
         await sleep(waitMs);
@@ -194,38 +219,7 @@ function extractScope(body) {
 }
 
 async function main() {
-  const issueBody = process.env.ISSUE_BODY || "";
-  const scope = extractScope(issueBody);
+  const isRemediation = process.argv.includes("--mode=remediate");
 
-  const apiPrompt = fs.readFileSync(".github/agents/prompts/server-agent.md", "utf8");
-  const clientPrompt = fs.readFileSync(".github/agents/prompts/client-agent.md", "utf8");
-  const qaPrompt = fs.readFileSync(".github/agents/prompts/qa-agent.md", "utf8");
-
-  console.log(`Executing pipeline for scope: [${scope}]`);
-
-  switch (scope) {
-    case "client":
-      await runAgentTurn(clientPrompt, `Implement frontend task:\n${issueBody}`);
-      break;
-
-    case "server":
-      await runAgentTurn(apiPrompt, `Implement server/API task:\n${issueBody}`);
-      break;
-
-    case "testing":
-      await runAgentTurn(qaPrompt, `Implement testing task or fix failing suites:\n${issueBody}`);
-      break;
-
-    case "monorepo":
-    default:
-      await runAgentTurn(apiPrompt, `Implement backend requirements:\n${issueBody}`);
-      await runAgentTurn(clientPrompt, `Implement frontend requirements:\n${issueBody}`);
-      await runAgentTurn(qaPrompt, "Run all workspace tests and resolve any failures.");
-      break;
-  }
-}
-
-main().catch((err) => {
-  console.error("Runner failed:", err);
-  process.exit(1);
-});
+  if (isRemediation) {
+    const feedback = process.env.
