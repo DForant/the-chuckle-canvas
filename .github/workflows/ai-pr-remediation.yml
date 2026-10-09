@@ -1,0 +1,81 @@
+name: AI PR Remediation
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  remediate-pr:
+    if: github.event.review.state == 'changes_requested' && startsWith(github.event.pull_request.head.ref, 'ai/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Extract Review Feedback and Context
+        id: review_context
+        env:
+          REVIEW_BODY: ${{ github.event.review.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch inline line-item review comments if any exist
+          INLINE_COMMENTS=$(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${{ github.event.review.id }}/comments --jq '.[].body' || true)
+          
+          # Combine general review body and inline comments
+          COMBINED_FEEDBACK="### Review Summary\n$REVIEW_BODY\n\n### Inline Comments\n$INLINE_COMMENTS"
+          
+          # Store feedback as multiline environment for run-agent
+          echo "REVIEW_FEEDBACK<<EOF" >> $GITHUB_ENV
+          echo -e "$COMBINED_FEEDBACK" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Run Remediation Agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REVIEW_FEEDBACK: ${{ env.REVIEW_FEEDBACK }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          node .github/scripts/run-agent.mjs --mode=remediate
+
+      - name: Commit and Push Remediation Fixes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Only commit if changes were made
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "fix(remediation): apply requested reviewer changes"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+            
+            # Post comment to acknowledge fixes
+            gh pr comment ${{ github.event.pull_request.number }} --body "🤖 **Remediation Agent**: Addressed requested changes in commit $(git rev-parse --short HEAD). Please review the updated branch."
+          else
+            echo "No file changes detected during remediation run."
+          fi
