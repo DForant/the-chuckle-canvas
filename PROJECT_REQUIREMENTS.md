@@ -1,11 +1,11 @@
 # The Chuckle Canvas — Project Architecture & Environment Specification
 
 ## 1. System Architecture & Workspaces
-- **Repository Architecture:** Monorepo using `npm workspaces`.
+- **Repository Architecture:** Monorepo managed via `npm workspaces`.
 - **Client Workspace (`/client`):**
-  - **Framework:** Vite + React.
+  - **Framework:** Vite + React + Tailwind CSS.
   - **Local Port:** `http://localhost:3000`.
-  - **Proxy Routing:** All client requests beginning with `/api/*` MUST dynamically proxy to the local backend port (`http://localhost:4000`) via Vite's `server.proxy`.
+  - **Proxy Routing:** All client requests directed to `/api/*` MUST dynamically proxy to the local backend port (`http://localhost:4000`) via Vite's `server.proxy`.
 - **Server Workspace (`/server`):**
   - **Framework:** Node.js + Express.
   - **Local Port:** `http://localhost:4000`.
@@ -17,11 +17,11 @@
 
 | Environment | Client URL | Server / Gateway URL | Headless CMS (WPGraphQL) | Status / Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Local (Default)** | `http://localhost:3000` | `http://localhost:4000` | `https://cms.thechucklecanvas.com/graphql` | Primary dev target; `/api` proxies to port 4000 |
+| **Local (Default)** | `http://localhost:3000` | `http://localhost:4000` | `https://cms.thechucklecanvas.com/graphql` | Primary development target; `/api` proxies to port 4000 |
 | **Staging** | *https://stg.thechucklecanvas.com* | *https://stg-api.thechucklecanvas.com* | `https://cms.thechucklecanvas.com/graphql` | **DO NOT TARGET** in local source or configs |
 | **Production** | `https://thechucklecanvas.com` | `https://api.thechucklecanvas.com` | `https://cms.thechucklecanvas.com/graphql` | Target production domain |
 
-> **CRITICAL AGENT DIRECTIVE:** Never hardcode remote staging URLs (e.g., `https://stg.api.thechucklecanvas.com`) or assume staging endpoints exist. The local client must always default to `http://localhost:4000` for backend communication unless explicitly overridden by `process.env.API_TARGET`.
+> **CRITICAL DIRECTIVE:** Never hardcode remote staging URLs (e.g., `https://stg.api.thechucklecanvas.com`) or assume staging endpoints exist. The local client must always default to `http://localhost:4000` for backend communication unless explicitly overridden by `process.env.API_TARGET`.
 
 ---
 
@@ -54,75 +54,67 @@
     price
     regularPrice
   }
+  ```
+
 ### Entity Missing & Status Code Normalization
-When a product is not found by slug, WPGraphQL returns an error containing: "No product ID was found corresponding to the slug..." or an empty payload { data: { product: null } }.
+- When a product is not found by slug, WPGraphQL returns an error containing: `"No product ID was found corresponding to the slug..."` or an empty payload `{ data: { product: null } }`.
+- These conditions MUST be normalized to an **HTTP 404 Not Found** response.
+- Only malformed GraphQL syntax or schema validation errors may return an **HTTP 400 Bad Request**.
 
-These conditions MUST be normalized to an HTTP 404 Not Found response.
-
-Only malformed GraphQL syntax or schema validation errors may return an HTTP 400 Bad Request.
+---
 
 ## 5. Express API Contracts
-- GET /health
-   -Response 200 OK:
 
+### `GET /health`
+- **Response 200 OK:**
+  ```json
+  {
+    "status": "ok",
+    "timestamp": "ISO-8601 string"
+  }
+  ```
 
-JSON
-```
-{
-  "status": "ok",
-  "timestamp": "ISO-8601 string"
-}
-```
-
-- GET /api/products
-   - Response 200 OK:
-
-JSON
-```
-{
-  "products": [
-    {
-      "id": "string",
-      "title": "string",
-      "slug": "string",
-      "price": "string",
-      "imageUrl": "string",
-      "description": "string"
+### `GET /api/products`
+- **Response 200 OK:**
+  ```json
+  {
+    "products": [
+      {
+        "id": "string",
+        "title": "string",
+        "slug": "string",
+        "price": "string",
+        "imageUrl": "string",
+        "description": "string"
+      }
+    ],
+    "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": "string | null"
     }
-  ],
-  "pageInfo": {
-    "hasNextPage": false,
-    "endCursor": "string | null"
   }
-}
-```
+  ```
 
-- GET /api/products/:slug
-   - Response 200 OK: Single normalized product detail object (including gallery, variants, and categories).
-
-   - Response 404 Not Found:
-
-JSON
-
-```{
-  "error": {
-    "message": "Product not found",
-    "status": 404
+### `GET /api/products/:slug`
+- **Response 200 OK:** Single normalized product detail object (including gallery, variants, and categories).
+- **Response 404 Not Found:**
+  ```json
+  {
+    "error": {
+      "message": "Product not found",
+      "status": 404
+    }
   }
-}
-```
+  ```
+
+---
 
 ## 6. Testing & Quality Gate (Definition of Done)
 Any pull request, automated agent contribution, or manual refactor must satisfy these conditions:
 
-1. No Rogue Imports: Never import from node:test in application or test code. Use Jest globals (describe, it, expect, jest) on the server and Vitest globals on the client.
-
-2. Zero Mock Drift: If a service schema, route payload, or normalization function is updated, the corresponding unit test mocks in server/test/ or client/src/__tests__/ must be updated simultaneously.
-
-3. Automated Verification:
-
-- npm test --workspace=server passes with 0 failures, 0 errors, and no open handles.
-
-- npm test --workspace=client passes with 0 failures.
-
-- npm run build --workspaces exits with code 0.
+1. **No Rogue Imports:** Never import from `node:test` in application or test code. Use Jest globals (`describe`, `it`, `expect`, `jest`) on the server and Vitest globals on the client.
+2. **Zero Mock Drift:** If a service schema, route payload, or normalization function is updated, the corresponding unit test mocks in `server/test/` or `client/src/__tests__/` must be updated simultaneously.
+3. **Automated Verification:**
+   - `npm test --workspace=server` passes with 0 failures, 0 errors, and no open handles.
+   - `npm test --workspace=client` passes with 0 failures.
+   - `npm run build --workspaces` exits with code 0.
