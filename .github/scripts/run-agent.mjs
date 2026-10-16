@@ -6,7 +6,7 @@ import path from "path";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Disallowed directories and extensions to protect token context
-const BLOCKED_DIRECTORIES = ["node_modules", ".git", "dist", "build", "coverage", ".next"];
+const BLOCKED_DIRECTORIES = ["node_modules", ".git", "dist", "build", "coverage", ".next", "apps/web"];
 const BLOCKED_EXTENSIONS = [
   ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
   ".pdf", ".zip", ".tar", ".gz", ".lock", ".woff", ".woff2", ".ttf"
@@ -172,13 +172,37 @@ async function sendWithRetry(chatSession, payload, maxRetries = 5) {
 }
 
 async function runAgentTurn(systemPrompt, userPrompt) {
-  const session = ai.chats.create({
-    model: "gemini-3.5-flash-lite",
-    config: {
-      systemInstruction: systemPrompt,
-      tools: tools
+  // Model priority: Verified working free-tier model first
+  const CANDIDATE_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash"
+  ];
+
+  let session = null;
+  let activeModel = null;
+
+  for (const modelName of CANDIDATE_MODELS) {
+    try {
+      session = ai.chats.create({
+        model: modelName,
+        config: {
+          systemInstruction: systemPrompt,
+          tools: tools
+        }
+      });
+      activeModel = modelName;
+      break;
+    } catch (e) {
+      console.warn(`[Model Init] Model ${modelName} rejected on current key/tier. Trying next candidate...`);
     }
-  });
+  }
+
+  if (!session) {
+    throw new Error("Failed to initialize chat session across all candidate models.");
+  }
+
+  console.log(`[Agent Session Active] Model: ${activeModel}`);
 
   let response = await sendWithRetry(session, { message: userPrompt });
   let turnCount = 0;
@@ -218,17 +242,29 @@ function extractScope(body) {
   return match ? match[1].trim().toLowerCase() : "monorepo";
 }
 
+function getBaseDirectives() {
+  const agents = fs.existsSync("AGENTS.md") ? fs.readFileSync("AGENTS.md", "utf8") : "";
+  const reqs = fs.existsSync("PROJECT_REQUIREMENTS.md") ? fs.readFileSync("PROJECT_REQUIREMENTS.md", "utf8") : "";
+  return `${agents}\n\n---\n## ARCHITECTURAL CONTEXT & SCHEMAS:\n${reqs}`;
+}
+
 async function main() {
   const isRemediation = process.argv.includes("--mode=remediate");
+  const baseDirectives = getBaseDirectives();
 
   if (isRemediation) {
     const feedback = process.env.REVIEW_FEEDBACK || "";
     const prTitle = process.env.PR_TITLE || "";
     const baseBranch = process.env.BASE_BRANCH || "main";
 
-    const remediationPrompt = fs.readFileSync(".github/agents/prompts/remediation-agent.md", "utf8");
+    let remediationBasePrompt = "You are a senior full-stack engineer performing surgical remediation on an active PR.";
+    if (fs.existsSync(".github/agents/prompts/remediation-agent.md")) {
+      remediationBasePrompt = fs.readFileSync(".github/agents/prompts/remediation-agent.md", "utf8");
+    }
 
-    console.log(`Starting PR remediation run for PR: "${prTitle}" against base: "${baseBranch}"`);
+    const systemPrompt = `${baseDirectives}\n\n---\n${remediationBasePrompt}`;
+
+    console.log(`Starting PR remediation for PR: "${prTitle}" against base: "${baseBranch}"`);
 
     const userPayload = `
 ### Target PR: ${prTitle}
@@ -237,19 +273,26 @@ async function main() {
 ### Reviewer Feedback / Requested Changes:
 ${feedback}
 
-Please use getGitDiff(baseBranch: "${baseBranch}") to review what was modified, inspect the problematic files using readFile, correct the code using writeFile, and verify using runCommand.
+Execution Directives:
+1. Call getGitDiff(baseBranch: "${baseBranch}") to inspect existing modifications.
+2. Read the affected files using readFile.
+3. Write surgical updates using writeFile to resolve all reviewer feedback.
+4. Execute verification commands via runCommand:
+   - npm test --workspace=client -- --run
+   - npm test --workspace=server -- --runInBand
+   - npm run build --workspaces --if-present
 `;
 
-    await runAgentTurn(remediationPrompt, userPayload);
+    await runAgentTurn(systemPrompt, userPayload);
     return;
   }
 
   const issueBody = process.env.ISSUE_BODY || "";
   const scope = extractScope(issueBody);
 
-  const apiPrompt = fs.readFileSync(".github/agents/prompts/server-agent.md", "utf8");
-  const clientPrompt = fs.readFileSync(".github/agents/prompts/client-agent.md", "utf8");
-  const qaPrompt = fs.readFileSync(".github/agents/prompts/qa-agent.md", "utf8");
+  const apiPrompt = `${baseDirectives}\n\n` + fs.readFileSync(".github/agents/prompts/server-agent.md", "utf8");
+  const clientPrompt = `${baseDirectives}\n\n` + fs.readFileSync(".github/agents/prompts/client-agent.md", "utf8");
+  const qaPrompt = `${baseDirectives}\n\n` + fs.readFileSync(".github/agents/prompts/qa-agent.md", "utf8");
 
   console.log(`Executing pipeline for scope: [${scope}]`);
 

@@ -43,16 +43,16 @@ jobs:
         run: |
           BRANCH="ai/issue-${ISSUE_NUM}"
           
-          # 1. Resolve default base branch dynamically
+          # Resolve default base branch dynamically
           DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 2. Switch to a new branch preserving the workspace file modifications
+          # Switch to new branch preserving file modifications
           git checkout -b "$BRANCH"
           
-          # 3. Stage all modified, created, or deleted files
+          # Stage all modified, created, or deleted files
           git add -A
 
           # Exit cleanly if no modifications were made
@@ -64,7 +64,7 @@ jobs:
           git commit -m "feat: automated changes for issue #${ISSUE_NUM}"
           git push origin "$BRANCH" --force
 
-          # 4. Create the Pull Request against the default branch
+          # Create the Pull Request against the default branch
           gh pr create \
             --title "AI: ${ISSUE_TITLE}" \
             --body "Resolves #${ISSUE_NUM}. Scope handled automatically by AI Studio Orchestrator." \
