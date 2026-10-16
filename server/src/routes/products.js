@@ -3,11 +3,22 @@ const { fetchProducts, fetchProductBySlug } = require('../services/cms');
 
 const router = express.Router();
 
+function deduplicate(products = []) {
+  const seen = new Set();
+  return products.filter((item) => {
+    const key = item.id || item.slug;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // GET /api/products
 router.get('/', async (req, res, next) => {
   try {
     const result = await fetchProducts();
-    res.status(200).json({ products: result.products });
+    const uniqueProducts = deduplicate(result?.products || []);
+    res.status(200).json({ products: uniqueProducts });
   } catch (err) {
     next(err);
   }
