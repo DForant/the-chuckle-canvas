@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ProductGrid from '../components/ProductGrid';
-import { Sparkles, RefreshCw, AlertCircle, Search } from 'lucide-react';
+import { Sparkles, RefreshCw, Search } from 'lucide-react';
 import { fetchProducts } from '../services/api';
 
 // Fallback mock products in case CMS gateway is unreachable during dev
@@ -39,33 +39,52 @@ const FALLBACK_PRODUCTS = [
   }
 ];
 
+// Helper to guarantee items are unique by ID or Slug
+function deduplicateProducts(items = []) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.id || item.slug;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function CatalogPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const loadCatalog = async () => {
+  const loadCatalog = useCallback(async (isMountedCheck = () => true) => {
     setLoading(true);
-    setError(null);
     try {
       const data = await fetchProducts();
-      if (data && data.products && data.products.length > 0) {
-        setProducts(data.products);
+      if (!isMountedCheck()) return;
+
+      if (data && Array.isArray(data.products) && data.products.length > 0) {
+        setProducts(deduplicateProducts(data.products));
       } else {
         setProducts(FALLBACK_PRODUCTS);
       }
     } catch (err) {
+      if (!isMountedCheck()) return;
       console.warn('Gateway unavailable, using fallback mock catalog:', err);
       setProducts(FALLBACK_PRODUCTS);
     } finally {
-      setLoading(false);
+      if (isMountedCheck()) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadCatalog();
-  }, []);
+    let isMounted = true;
+    loadCatalog(() => isMounted);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadCatalog]);
 
   const filteredProducts = products.filter(p =>
     (p.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -87,11 +106,11 @@ export default function CatalogPage() {
             The Chuckle Canvas Catalog
           </h1>
           <p className="text-indigo-100 text-sm sm:text-base leading-relaxed mb-6">
-            Explore our curated collection of humorous masterpieces and high-quality canvases designed to spark joy and laughter in every room.
+            Explore our curated collection of sarcastic masterpieces and prints designed to spark smirks and peak mediocre joy in every room.
           </p>
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={loadCatalog}
+              onClick={() => loadCatalog()}
               disabled={loading}
               className="inline-flex items-center space-x-2 bg-white text-indigo-600 font-semibold px-6 py-3 rounded-2xl shadow-md hover:bg-indigo-50 transition transform active:scale-95 disabled:opacity-50 text-sm"
             >
@@ -112,12 +131,12 @@ export default function CatalogPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search canvases..."
+            placeholder="Search products..."
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
           />
         </div>
         <div className="text-xs text-gray-500 font-medium">
-          Showing <span className="font-bold text-gray-900">{filteredProducts.length}</span> canvases
+          Showing <span className="font-bold text-gray-900">{filteredProducts.length}</span> products
         </div>
       </div>
 
