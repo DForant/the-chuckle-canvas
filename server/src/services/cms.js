@@ -47,7 +47,7 @@ async function graphQLClient(query, variables = {}, headers = {}) {
     throw error;
   }
 
-if (result.errors && result.errors.length > 0) {
+  if (result.errors && result.errors.length > 0) {
     const errorMessages = result.errors.map(e => e.message).join(', ');
     const error = new Error(`GraphQL Error: ${errorMessages}`);
     
@@ -121,6 +121,20 @@ function normalizeProductDetail(node) {
 }
 
 /**
+ * Deduplicates product records by unique ID or slug.
+ */
+function deduplicateNodes(nodes = []) {
+  const seen = new Set();
+  return nodes.filter((node) => {
+    if (!node) return false;
+    const key = node.slug || node.databaseId || node.id;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Fetch published products returning { products: Array, pageInfo: Object }.
  */
 async function fetchProducts(first = 20, after = null) {
@@ -158,7 +172,10 @@ async function fetchProducts(first = 20, after = null) {
 
   const data = await graphQLClient(query, { first, after });
   const productConnection = data?.products || { nodes: [], pageInfo: {} };
-  const products = (productConnection.nodes || []).map(normalizeProduct);
+  
+  // Deduplicate upstream nodes before mapping to client schema
+  const uniqueNodes = deduplicateNodes(productConnection.nodes || []);
+  const products = uniqueNodes.map(normalizeProduct).filter(Boolean);
 
   return {
     products,
